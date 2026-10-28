@@ -1,0 +1,60 @@
+name: Build APK dari ZIP
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '*.zip'
+      - '.github/workflows/build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Ekstrak ZIP
+        run: |
+          ZIP=$(ls *.zip | head -1)
+          echo "ZIP: $ZIP"
+          mkdir -p build && unzip -q "$ZIP" -d build
+          PKG=$(find build -name package.json -not -path '*/node_modules/*' | head -1)
+          echo "PROJ=$(dirname "$PKG")" >> $GITHUB_ENV
+
+      - name: Install dependencies
+        working-directory: ${{ env.PROJ }}
+        run: |
+          npm install --legacy-peer-deps
+          npx expo install expo-video expo-image-picker expo-document-picker expo-file-system expo-media-library expo-status-bar react-native-safe-area-context @react-native-async-storage/async-storage -- --legacy-peer-deps
+          npx expo install --fix -- --legacy-peer-deps
+
+      - name: Generate project Android
+        working-directory: ${{ env.PROJ }}
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build APK
+        working-directory: ${{ env.PROJ }}/android
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+
+      - name: Siapkan APK
+        run: cp "${{ env.PROJ }}/android/app/build/outputs/apk/release/app-release.apk" MATAI.apk
+
+      - name: Upload ke Releases (bisa diunduh langsung dari HP)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: MATAI build ${{ github.run_number }}
+          files: MATAI.apk
